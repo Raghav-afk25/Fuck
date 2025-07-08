@@ -92,7 +92,7 @@ async def get_song_data(query: str):
     for source_func in [scrap_pagalworld, scrap_jiosaavn, scrap_hungama, scrap_youtube]:
         try:
             result = await source_func(query)
-            if result:
+            if result and result.get("url"):  # ✅ Only accept if URL is valid
                 return {"status": "success", "data": result}
         except:
             continue

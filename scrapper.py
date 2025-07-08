@@ -8,10 +8,8 @@ from asyncio import Semaphore
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# ✅ Limit concurrent downloads to avoid 429 errors
-semaphore = Semaphore(5)
+semaphore = Semaphore(2)  # 🔽 Lowered for safety
 
-# ✅ Clean old downloaded files
 def cleanup_downloads(max_age_sec=3600):
     now = time.time()
     for f in os.listdir(DOWNLOAD_DIR):
@@ -26,14 +24,10 @@ async def download_song_from_video_id(video_id: str) -> str:
     filename = f"{video_id}.m4a"
     output_path = os.path.join(DOWNLOAD_DIR, filename)
 
-    # ✅ Return if already cached
     if os.path.exists(output_path):
         return output_path
 
-    # ✅ Background cleanup
     asyncio.create_task(asyncio.to_thread(cleanup_downloads))
-
-    # ✅ Random delay (anti-bot pattern)
     await asyncio.sleep(random.uniform(1, 2))
 
     async with semaphore:
@@ -44,19 +38,10 @@ async def download_song_from_video_id(video_id: str) -> str:
             "quiet": True,
             "noplaylist": True,
             "outtmpl": output_path,
-            "cookiefile": cookies_path,  # ✅ Correct key (NOT plural)
-            "external_downloader": "aria2c",
-            "external_downloader_args": [
-                "--min-split-size=1M",
-                "--max-connection-per-server=8",
-                "--split=8",
-                "--allow-overwrite=true",
-                "--summary-interval=0"
-            ],
-            "concurrent_fragment_downloads": 4,
+            "cookiefile": cookies_path,
+            "continuedl": True,
             "retries": 5,
             "fragment_retries": 10,
-            "continuedl": True,
             "overwrites": True,
             "noprogress": True,
             "http_chunk_size": "1M",

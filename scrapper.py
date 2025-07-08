@@ -12,7 +12,6 @@ async def download_song_from_video_id(video_id: str) -> str:
     if os.path.exists(output_path):
         return output_path
 
-    # ✅ Absolute path to cookies file inside 'cookies/' folder
     cookies_path = os.path.abspath("cookies/cookies.txt")
 
     ydl_opts = {
@@ -20,9 +19,16 @@ async def download_song_from_video_id(video_id: str) -> str:
         "quiet": True,
         "noplaylist": True,
         "outtmpl": output_path,
-        "concurrent_fragment_downloads": 10,
-        "nocheckcertificate": True,
-        "cookiefile": cookies_path  # ✅ fixed path
+        "cookiefile": cookies_path,
+        "concurrent_fragment_downloads": 15,         # ⏩ Max fragments
+        "retries": 3,                                # Retry if fail
+        "fragment_retries": 5,
+        "continuedl": True,                          # Resume partial
+        "nopart": False,                             # Enable part files
+        "noprogress": True,                          # No stdout delay
+        "http_chunk_size": "1M",                     # Smaller chunks = faster parallel
+        "hls_use_mpegts": True,                      # Better on live/vod
+        "overwrites": True                           # Always overwrite
     }
 
     try:

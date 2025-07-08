@@ -12,6 +12,9 @@ async def download_song_from_video_id(video_id: str) -> str:
     if os.path.exists(output_path):
         return output_path
 
+    # ✅ Absolute path to cookies file inside 'cookies/' folder
+    cookies_path = os.path.abspath("cookies/cookies.txt")
+
     ydl_opts = {
         "format": "bestaudio[ext=m4a]/bestaudio/best",
         "quiet": True,
@@ -19,7 +22,7 @@ async def download_song_from_video_id(video_id: str) -> str:
         "outtmpl": output_path,
         "concurrent_fragment_downloads": 10,
         "nocheckcertificate": True,
-        "cookiefile": "cookies.txt"  # optional, can remove
+        "cookiefile": cookies_path  # ✅ fixed path
     }
 
     try:

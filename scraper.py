@@ -16,7 +16,6 @@ async def scrap_pagalworld(query: str):
             first_result = soup.select_one("div.media a")
             if not first_result:
                 return None
-
             song_page = "https://www.pagalworldl.com" + first_result.get("href")
             res2 = await client.get(song_page, headers=headers, timeout=10)
             soup2 = BeautifulSoup(res2.text, "html.parser")
@@ -33,16 +32,24 @@ async def scrap_pagalworld(query: str):
 async def scrap_jiosaavn(query: str):
     try:
         async with httpx.AsyncClient() as client:
-            search_url = f"https://www.jiosaavn.com/api.php?__call=autocomplete.get&query={query}&_format=json&_marker=0"
-            res = await client.get(search_url, headers=headers, timeout=10)
-            data = res.json()
-            song = data['songs']['data'][0]
-            return {
-                "title": song['title'],
-                "artist": song['more_info'].get('artistMap', {}).get('primary_artists', [{}])[0].get('name', ''),
-                "url": song['more_info'].get('media_url', ''),
-                "source": "JioSaavn"
-            }
+            auto_url = f"https://www.jiosaavn.com/api.php?__call=autocomplete.get&query={query}&_format=json&_marker=0"
+            auto_res = await client.get(auto_url, headers=headers, timeout=10)
+            auto_data = auto_res.json()
+            if not auto_data['songs']['data']:
+                return None
+            song_data = auto_data['songs']['data'][0]
+            token = song_data['perma_url'].split("/")[-1]
+            info_url = f"https://www.jiosaavn.com/api.php?__call=song.getDetails&token={token}&_format=json&_marker=0"
+            info_res = await client.get(info_url, headers=headers, timeout=10)
+            info_data = info_res.json()
+            media_url = info_data['songs'][0].get('media_url', '')
+            if media_url:
+                return {
+                    "title": info_data['songs'][0]['song'],
+                    "artist": info_data['songs'][0]['singers'],
+                    "url": media_url,
+                    "source": "JioSaavn"
+                }
     except:
         return None
 

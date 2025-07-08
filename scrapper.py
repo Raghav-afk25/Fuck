@@ -8,7 +8,7 @@ from asyncio import Semaphore
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-semaphore = Semaphore(2)  # 🔽 Lowered for safety
+semaphore = Semaphore(2)
 
 def cleanup_downloads(max_age_sec=3600):
     now = time.time()
@@ -44,7 +44,7 @@ async def download_song_from_video_id(video_id: str) -> str:
             "fragment_retries": 10,
             "overwrites": True,
             "noprogress": True,
-            "http_chunk_size": "1M",
+            "http_chunk_size": 1048576,  # ✅ Fixed float-related issue
             "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
             "http_headers": {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",

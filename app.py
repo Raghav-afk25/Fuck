@@ -52,7 +52,7 @@ async def download_song(video_id: str):
             "retries": 3,
             "fragment_retries": 5,
             "concurrent_fragment_downloads": 15,
-            "http_chunk_size": "1M",
+            "http_chunk_size": 1048576,  # ✅ FIXED here (was "1M")
             "noprogress": True,
             "overwrites": True,
             "ffmpeg_location": "/usr/bin/ffmpeg",
@@ -81,4 +81,5 @@ async def download_song(video_id: str):
         raise HTTPException(status_code=404, detail="File not found")
 
     except Exception as e:
+        print("❌ Error:", str(e))  # helpful log
         raise HTTPException(status_code=500, detail=str(e))

@@ -14,10 +14,13 @@ async def download_song(video_id: str):
         output_path = os.path.join(DOWNLOAD_DIR, f"{video_id}.m4a")
 
         if not os.path.exists(output_path):
+            # ✅ Corrected path for cookies
+            cookies_path = os.path.abspath("cookies/cookies.txt")
+
             ydl_opts = {
                 "format": "bestaudio[ext=m4a]/bestaudio",
                 "quiet": True,
-                "cookiefile": "cookies.txt",
+                "cookiefile": cookies_path,
                 "outtmpl": output_path
             }
 

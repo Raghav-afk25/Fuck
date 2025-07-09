@@ -3,44 +3,34 @@ from fastapi.responses import FileResponse
 from yt_dlp import YoutubeDL
 import os
 import asyncio
-import time
 import glob
+import time
 
 app = FastAPI()
 
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-def cleanup_downloads(max_age_sec=3600):
-    now = time.time()
-    for file in os.listdir(DOWNLOAD_DIR):
-        path = os.path.join(DOWNLOAD_DIR, file)
-        if os.path.isfile(path) and now - os.path.getmtime(path) > max_age_sec:
-            try:
-                os.remove(path)
-            except:
-                pass
-
 @app.get("/download/song/{video_id}")
 async def download_song(video_id: str):
     try:
         filename_pattern = os.path.join(DOWNLOAD_DIR, f"{video_id}.*")
-        matched_files = glob.glob(filename_pattern)
 
-        # ✅ Return already existing file
-        if matched_files:
+        # Return existing file if available
+        existing_files = glob.glob(filename_pattern)
+        if existing_files:
             return FileResponse(
-                path=matched_files[0],
-                filename=os.path.basename(matched_files[0]),
+                path=existing_files[0],
+                filename=os.path.basename(existing_files[0]),
                 media_type="audio/mp4"
             )
 
-        asyncio.create_task(asyncio.to_thread(cleanup_downloads))
-
+        # Make sure cookies.txt exists
         cookies_path = os.path.abspath("cookies/cookies.txt")
         if not os.path.exists(cookies_path):
             raise HTTPException(status_code=500, detail="❌ cookies.txt not found")
 
+        # Set yt-dlp options
         ydl_opts = {
             "format": "bestaudio/best",
             "quiet": True,
@@ -61,22 +51,26 @@ async def download_song(video_id: str):
                     "preferredcodec": "m4a",
                     "preferredquality": "192"
                 }
-            ],
-            "threads": 8
+            ]
         }
 
+        # Download asynchronously
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, lambda: YoutubeDL(ydl_opts).download([f"https://www.youtube.com/watch?v={video_id}"]))
+        result = await loop.run_in_executor(
+            None,
+            lambda: YoutubeDL(ydl_opts).download([f"https://www.youtube.com/watch?v={video_id}"])
+        )
 
-        # ✅ After download, search again for final file
-        matched_files = glob.glob(filename_pattern)
-        if matched_files:
+        # After download, search again for file
+        downloaded_files = glob.glob(filename_pattern)
+        if downloaded_files:
             return FileResponse(
-                path=matched_files[0],
-                filename=os.path.basename(matched_files[0]),
+                path=downloaded_files[0],
+                filename=os.path.basename(downloaded_files[0]),
                 media_type="audio/mp4"
             )
 
+        # If still not found, throw error
         raise HTTPException(status_code=404, detail="❌ File not found after download")
 
     except Exception as e:

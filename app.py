@@ -16,20 +16,16 @@ async def download_song(video_id: str):
         if len(video_id) != 11:
             raise HTTPException(status_code=400, detail="❌ Invalid YouTube video ID")
 
-        # Check cache
         file_pattern = os.path.join(DOWNLOAD_DIR, f"{video_id}.*")
-        cached_files = glob.glob(file_pattern)
-        if cached_files:
+        cached = glob.glob(file_pattern)
+        if cached:
             return FileResponse(
-                path=cached_files[0],
-                filename=os.path.basename(cached_files[0]),
-                media_type="audio/mp4"
+                path=cached[0],
+                filename=os.path.basename(cached[0]),
+                media_type="audio/webm"
             )
 
         cookies_path = os.path.abspath("cookies/cookies.txt")
-        if not os.path.exists(cookies_path):
-            raise HTTPException(status_code=500, detail="❌ cookies.txt not found")
-
         output_path = os.path.join(DOWNLOAD_DIR, f"{video_id}.%(ext)s")
 
         command = [
@@ -37,26 +33,25 @@ async def download_song(video_id: str):
             f"https://www.youtube.com/watch?v={video_id}",
             "-f", "bestaudio/best",
             "--extract-audio",
-            "--audio-format", "m4a",
+            "--audio-format", "opus",
             "--audio-quality", "0",
             "--cookies", cookies_path,
             "-o", output_path,
             "--quiet",
             "--no-warnings",
             "--ffmpeg-location", "/usr/bin/ffmpeg",
-            "--retries", "3",
-            "--fragment-retries", "5"
+            "--no-post-overwrites",
+            "--no-mtime"
         ]
 
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, lambda: subprocess.run(command))
+        await asyncio.get_event_loop().run_in_executor(None, lambda: subprocess.run(command))
 
-        final_files = glob.glob(os.path.join(DOWNLOAD_DIR, f"{video_id}.*"))
-        if final_files:
+        final = glob.glob(os.path.join(DOWNLOAD_DIR, f"{video_id}.*"))
+        if final:
             return FileResponse(
-                path=final_files[0],
-                filename=os.path.basename(final_files[0]),
-                media_type="audio/mp4"
+                path=final[0],
+                filename=os.path.basename(final[0]),
+                media_type="audio/webm"
             )
 
         raise HTTPException(status_code=404, detail="❌ File not found after download")

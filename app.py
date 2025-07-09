@@ -10,7 +10,6 @@ app = FastAPI()
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# ✅ Cleanup old files in background
 def cleanup_downloads(max_age_sec=3600):
     now = time.time()
     for file in os.listdir(DOWNLOAD_DIR):
@@ -27,7 +26,7 @@ async def download_song(video_id: str):
         filename = f"{video_id}.m4a"
         output_path = os.path.join(DOWNLOAD_DIR, filename)
 
-        # ✅ Already downloaded? Return it
+        # ✅ Already downloaded? Return directly
         if os.path.exists(output_path):
             return FileResponse(
                 path=output_path,
@@ -35,13 +34,13 @@ async def download_song(video_id: str):
                 media_type="audio/mp4"
             )
 
-        # ✅ Background cleanup
         asyncio.create_task(asyncio.to_thread(cleanup_downloads))
 
-        # ✅ Full path to cookies
+        # ✅ Cookie path check
         cookies_path = os.path.abspath("cookies/cookies.txt")
+        if not os.path.exists(cookies_path):
+            raise HTTPException(status_code=500, detail="❌ cookies.txt not found in /cookies")
 
-        # ✅ Ultra-fast yt-dlp + FFmpeg settings
         ydl_opts = {
             "format": "bestaudio/best",
             "quiet": True,
@@ -52,7 +51,7 @@ async def download_song(video_id: str):
             "retries": 3,
             "fragment_retries": 5,
             "concurrent_fragment_downloads": 15,
-            "http_chunk_size": 1048576,  # ✅ FIXED here (was "1M")
+            "http_chunk_size": 1048576,  # 1MB
             "noprogress": True,
             "overwrites": True,
             "ffmpeg_location": "/usr/bin/ffmpeg",
@@ -66,11 +65,11 @@ async def download_song(video_id: str):
             "threads": 8
         }
 
-        # ✅ Run yt-dlp in background thread
+        # ✅ Download with yt-dlp in background
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, lambda: YoutubeDL(ydl_opts).download([f"https://www.youtube.com/watch?v={video_id}"]))
 
-        # ✅ Return if download was successful
+        # ✅ Return file if downloaded
         if os.path.exists(output_path):
             return FileResponse(
                 path=output_path,
@@ -78,8 +77,8 @@ async def download_song(video_id: str):
                 media_type="audio/mp4"
             )
 
-        raise HTTPException(status_code=404, detail="File not found")
+        raise HTTPException(status_code=404, detail="❌ File not found after download")
 
     except Exception as e:
-        print("❌ Error:", str(e))  # helpful log
+        print("❌ Error:", str(e))
         raise HTTPException(status_code=500, detail=str(e))

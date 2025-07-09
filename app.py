@@ -4,6 +4,7 @@ from yt_dlp import YoutubeDL
 import os
 import asyncio
 import time
+import glob
 
 app = FastAPI()
 
@@ -23,35 +24,34 @@ def cleanup_downloads(max_age_sec=3600):
 @app.get("/download/song/{video_id}")
 async def download_song(video_id: str):
     try:
-        filename = f"{video_id}.m4a"
-        output_path = os.path.join(DOWNLOAD_DIR, filename)
+        filename_pattern = os.path.join(DOWNLOAD_DIR, f"{video_id}.*")
+        matched_files = glob.glob(filename_pattern)
 
-        # ✅ Already downloaded? Return directly
-        if os.path.exists(output_path):
+        # ✅ Return already existing file
+        if matched_files:
             return FileResponse(
-                path=output_path,
-                filename=filename,
+                path=matched_files[0],
+                filename=os.path.basename(matched_files[0]),
                 media_type="audio/mp4"
             )
 
         asyncio.create_task(asyncio.to_thread(cleanup_downloads))
 
-        # ✅ Cookie path check
         cookies_path = os.path.abspath("cookies/cookies.txt")
         if not os.path.exists(cookies_path):
-            raise HTTPException(status_code=500, detail="❌ cookies.txt not found in /cookies")
+            raise HTTPException(status_code=500, detail="❌ cookies.txt not found")
 
         ydl_opts = {
             "format": "bestaudio/best",
             "quiet": True,
             "cookiefile": cookies_path,
-            "outtmpl": output_path,
+            "outtmpl": os.path.join(DOWNLOAD_DIR, f"{video_id}.%(ext)s"),
             "noplaylist": True,
             "continuedl": True,
             "retries": 3,
             "fragment_retries": 5,
             "concurrent_fragment_downloads": 15,
-            "http_chunk_size": 1048576,  # 1MB
+            "http_chunk_size": 1048576,
             "noprogress": True,
             "overwrites": True,
             "ffmpeg_location": "/usr/bin/ffmpeg",
@@ -65,15 +65,15 @@ async def download_song(video_id: str):
             "threads": 8
         }
 
-        # ✅ Download with yt-dlp in background
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, lambda: YoutubeDL(ydl_opts).download([f"https://www.youtube.com/watch?v={video_id}"]))
 
-        # ✅ Return file if downloaded
-        if os.path.exists(output_path):
+        # ✅ After download, search again for final file
+        matched_files = glob.glob(filename_pattern)
+        if matched_files:
             return FileResponse(
-                path=output_path,
-                filename=filename,
+                path=matched_files[0],
+                filename=os.path.basename(matched_files[0]),
                 media_type="audio/mp4"
             )
 

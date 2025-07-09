@@ -4,7 +4,7 @@ from yt_dlp import YoutubeDL
 import os
 import asyncio
 import glob
-import time
+import subprocess
 
 app = FastAPI()
 
@@ -14,10 +14,13 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 @app.get("/download/song/{video_id}")
 async def download_song(video_id: str):
     try:
-        filename_pattern = os.path.join(DOWNLOAD_DIR, f"{video_id}.*")
+        # ✅ 1. Check for valid YouTube video ID
+        if len(video_id) != 11:
+            raise HTTPException(status_code=400, detail="❌ Invalid YouTube video ID (must be 11 characters)")
 
-        # Return existing file if available
-        existing_files = glob.glob(filename_pattern)
+        # ✅ 2. Check if file already exists (cache)
+        file_pattern = os.path.join(DOWNLOAD_DIR, f"{video_id}.*")
+        existing_files = glob.glob(file_pattern)
         if existing_files:
             return FileResponse(
                 path=existing_files[0],
@@ -25,52 +28,43 @@ async def download_song(video_id: str):
                 media_type="audio/mp4"
             )
 
-        # Make sure cookies.txt exists
+        # ✅ 3. Check cookies
         cookies_path = os.path.abspath("cookies/cookies.txt")
         if not os.path.exists(cookies_path):
             raise HTTPException(status_code=500, detail="❌ cookies.txt not found")
 
-        # Set yt-dlp options
-        ydl_opts = {
-            "format": "bestaudio/best",
-            "quiet": True,
-            "cookiefile": cookies_path,
-            "outtmpl": os.path.join(DOWNLOAD_DIR, f"{video_id}.%(ext)s"),
-            "noplaylist": True,
-            "continuedl": True,
-            "retries": 3,
-            "fragment_retries": 5,
-            "concurrent_fragment_downloads": 15,
-            "http_chunk_size": 1048576,
-            "noprogress": True,
-            "overwrites": True,
-            "ffmpeg_location": "/usr/bin/ffmpeg",
-            "postprocessors": [
-                {
-                    "key": "FFmpegExtractAudio",
-                    "preferredcodec": "m4a",
-                    "preferredquality": "192"
-                }
-            ]
-        }
+        # ✅ 4. Build yt-dlp command
+        output_path = os.path.join(DOWNLOAD_DIR, f"{video_id}.%(ext)s")
+        command = [
+            "yt-dlp",
+            f"https://www.youtube.com/watch?v={video_id}",
+            "-f", "bestaudio[ext=m4a]/bestaudio/best",
+            "--quiet",
+            "--no-warnings",
+            "--extract-audio",
+            "--audio-format", "m4a",
+            "--audio-quality", "0",
+            "--retries", "3",
+            "--fragment-retries", "5",
+            "--concurrent-fragment-downloads", "10",
+            "--cookiefile", cookies_path,
+            "-o", output_path,
+            "--ffmpeg-location", "/usr/bin/ffmpeg"
+        ]
 
-        # Download asynchronously
+        # ✅ 5. Run yt-dlp as external subprocess
         loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
-            None,
-            lambda: YoutubeDL(ydl_opts).download([f"https://www.youtube.com/watch?v={video_id}"])
-        )
+        await loop.run_in_executor(None, lambda: subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
 
-        # After download, search again for file
-        downloaded_files = glob.glob(filename_pattern)
-        if downloaded_files:
+        # ✅ 6. After download, find the actual file
+        final_files = glob.glob(os.path.join(DOWNLOAD_DIR, f"{video_id}.m4a"))
+        if final_files:
             return FileResponse(
-                path=downloaded_files[0],
-                filename=os.path.basename(downloaded_files[0]),
+                path=final_files[0],
+                filename=os.path.basename(final_files[0]),
                 media_type="audio/mp4"
             )
 
-        # If still not found, throw error
         raise HTTPException(status_code=404, detail="❌ File not found after download")
 
     except Exception as e:

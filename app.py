@@ -23,7 +23,7 @@ COOKIE_FILE = "cookies/cookies.txt"
 
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-Load download cache
+# Load download cache
 
 if os.path.exists(CACHE_FILE): with open(CACHE_FILE, "r") as f: cache = json.load(f) else: cache = {}
 

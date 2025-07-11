@@ -70,7 +70,7 @@ except Exception as e:
     print(f"[ERROR] yt-dlp failed: {e}")
     return None, None
 
-Delete old files to save space
+# Delete old files to save space
 
 def cleanup_downloads(max_age=3600): now = time.time() for f in os.listdir(DOWNLOAD_DIR): path = os.path.join(DOWNLOAD_DIR, f) if os.path.isfile(path) and now - os.path.getmtime(path) > max_age: os.remove(path)
 

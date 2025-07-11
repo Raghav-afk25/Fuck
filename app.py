@@ -136,3 +136,27 @@ async def get_status(task_id: str, video_id: str):
         return {"status": "done", "note": "file not found yet"}
     else:
         return {"status": task.state}
+
+@app.get("/song/{video_id}")
+async def song_direct_play(video_id: str):
+    cached_file = find_downloaded_file(video_id)
+    if cached_file and validate_downloaded_file(cached_file, video_id):
+        return FileResponse(cached_file, media_type='audio/mpeg')
+
+    task = download_audio_task.delay(video_id)
+    timeout = 30
+    interval = 1
+    waited = 0
+
+    while waited < timeout:
+        result = celery_app.AsyncResult(task.id)
+        if result.ready():
+            if result.successful():
+                cached_file = find_downloaded_file(video_id)
+                if cached_file and validate_downloaded_file(cached_file, video_id):
+                    return FileResponse(cached_file, media_type='audio/mpeg')
+            break
+        await asyncio.sleep(interval)
+        waited += interval
+
+    raise HTTPException(status_code=202, detail="File is being prepared. Try again in a few seconds.")

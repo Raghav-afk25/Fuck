@@ -10,7 +10,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-API_ID = int(os.getenv("API_ID")) API_HASH = os.getenv("API_HASH") BOT_TOKEN = os.getenv("BOT_TOKEN") CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
+API_ID = int(os.getenv("API_ID"))
+API_HASH = os.getenv("API_HASH")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
 
 app = FastAPI() DOWNLOAD_DIR = "downloads" CACHE_FILE = "cache.json" COOKIE_FILE = "cookies/cookies.txt" os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 

@@ -6,7 +6,7 @@ from pyrogram import Client
 from yt_dlp import YoutubeDL
 from dotenv import load_dotenv
 
-# Load .env
+# Load environment variables from .env
 load_dotenv()
 
 API_ID = int(os.getenv("API_ID"))
@@ -19,22 +19,22 @@ DOWNLOAD_DIR = "downloads"
 CACHE_FILE = "cache.json"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# Load cache
+# Load download cache
 if os.path.exists(CACHE_FILE):
     with open(CACHE_FILE, "r") as f:
         cache = json.load(f)
 else:
     cache = {}
 
-# Telegram bot client
+# Telegram Bot Client
 bot = Client("tg_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# Download audio from YouTube Music
+# Download from piped.video mirror (bypass YT cookies)
 def download_audio(video_id: str):
-    url = f"https://music.youtube.com/watch?v={video_id}"  # ⬅ YouTube Music bypass
+    url = f"https://piped.video/watch?v={video_id}"  # 🔁 YouTube mirror proxy
 
     ydl_opts = {
-        "format": "bestaudio[ext=m4a]/bestaudio/best",
+        "format": "bestaudio/best",
         "outtmpl": f"{DOWNLOAD_DIR}/%(title).50s.%(ext)s",
         "noplaylist": True,
         "quiet": True,
@@ -44,7 +44,10 @@ def download_audio(video_id: str):
         "nocheckcertificate": True,
         "socket_timeout": 10,
         "retries": 3,
+        "source_address": "0.0.0.0",
         "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "external_downloader": "aria2c",
+        "external_downloader_args": ["-x", "16", "-k", "1M"],
         "postprocessors": [
             {
                 "key": "FFmpegExtractAudio",
@@ -64,7 +67,7 @@ def download_audio(video_id: str):
         print(f"[ERROR] yt-dlp failed: {e}")
         return None, None
 
-# Cleanup old files
+# Delete old files to save space
 def cleanup_downloads(max_age=3600):
     now = time.time()
     for f in os.listdir(DOWNLOAD_DIR):
@@ -84,7 +87,7 @@ async def download(video_id: str = Query(..., min_length=6)):
 
     filename, title = download_audio(video_id)
     if not filename:
-        raise HTTPException(status_code=400, detail="Download failed or video is blocked (try different video ID)")
+        raise HTTPException(status_code=400, detail="Download failed or video is blocked")
 
     await bot.start()
     try:

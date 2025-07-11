@@ -35,6 +35,9 @@ USER_AGENTS = [
 ]
 YOUTUBE_CLIENTS = ["mweb", "web", "web_music", "android", "ios", "tv"]
 
+# Domain for file URLs
+DOMAIN = os.environ.get("API_DOMAIN", "http://localhost:8000")
+
 # FastAPI & CORS
 app = FastAPI(title="Advanced YouTube Audio Downloader API", version="4.0.0")
 app.add_middleware(
@@ -137,11 +140,13 @@ async def get_status(task_id: str, video_id: str):
     else:
         return {"status": task.state}
 
+# ✅ Updated JSON Response Version of /song/{video_id}
 @app.get("/song/{video_id}")
 async def song_direct_play(video_id: str):
     cached_file = find_downloaded_file(video_id)
     if cached_file and validate_downloaded_file(cached_file, video_id):
-        return FileResponse(cached_file, media_type='audio/mpeg')
+        file_url = f"{DOMAIN}/songfile/{os.path.basename(cached_file)}"
+        return {"status": "completed", "file_url": file_url}
 
     task = download_audio_task.delay(video_id)
     timeout = 30
@@ -154,9 +159,18 @@ async def song_direct_play(video_id: str):
             if result.successful():
                 cached_file = find_downloaded_file(video_id)
                 if cached_file and validate_downloaded_file(cached_file, video_id):
-                    return FileResponse(cached_file, media_type='audio/mpeg')
+                    file_url = f"{DOMAIN}/songfile/{os.path.basename(cached_file)}"
+                    return {"status": "completed", "file_url": file_url}
             break
         await asyncio.sleep(interval)
         waited += interval
 
     raise HTTPException(status_code=202, detail="File is being prepared. Try again in a few seconds.")
+
+# ✅ Serve file by filename (for bots to download via URL)
+@app.get("/songfile/{filename}")
+async def serve_song_file(filename: str):
+    file_path = os.path.join(DOWNLOAD_DIR, filename)
+    if os.path.exists(file_path):
+        return FileResponse(file_path, media_type="audio/mpeg")
+    raise HTTPException(status_code=404, detail="File not found")

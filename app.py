@@ -1,9 +1,7 @@
 import os
 import time
 import json
-import asyncio
 from fastapi import FastAPI, Query, HTTPException
-from fastapi.responses import FileResponse
 from pyrogram import Client
 from yt_dlp import YoutubeDL
 from dotenv import load_dotenv
@@ -21,20 +19,19 @@ DOWNLOAD_DIR = "downloads"
 CACHE_FILE = "cache.json"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# Load or create cache
+# Load cache
 if os.path.exists(CACHE_FILE):
     with open(CACHE_FILE, "r") as f:
         cache = json.load(f)
 else:
     cache = {}
 
-# Telegram bot
+# Telegram bot client
 bot = Client("tg_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# Download audio function
+# Download audio from YouTube Music
 def download_audio(video_id: str):
-    url = f"https://www.youtube.com/watch?v={video_id}"
-    filename = None
+    url = f"https://music.youtube.com/watch?v={video_id}"  # ⬅ YouTube Music bypass
 
     ydl_opts = {
         "format": "bestaudio[ext=m4a]/bestaudio/best",
@@ -67,7 +64,7 @@ def download_audio(video_id: str):
         print(f"[ERROR] yt-dlp failed: {e}")
         return None, None
 
-# Auto cleanup old files
+# Cleanup old files
 def cleanup_downloads(max_age=3600):
     now = time.time()
     for f in os.listdir(DOWNLOAD_DIR):
@@ -87,14 +84,14 @@ async def download(video_id: str = Query(..., min_length=6)):
 
     filename, title = download_audio(video_id)
     if not filename:
-        raise HTTPException(status_code=400, detail="Download failed (maybe video age-restricted or blocked)")
+        raise HTTPException(status_code=400, detail="Download failed or video is blocked (try different video ID)")
 
     await bot.start()
     try:
         sent = await bot.send_audio(
             chat_id=CHANNEL_ID,
             audio=filename,
-            caption=f"🎵 {title or 'Unknown Song'}"
+            caption=f"🎵 {title or 'Unknown'}"
         )
         file_id = sent.audio.file_id
         cache[video_id] = file_id

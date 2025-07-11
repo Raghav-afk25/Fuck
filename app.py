@@ -25,8 +25,11 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 # Load download cache
 
-if os.path.exists(CACHE_FILE): with open(CACHE_FILE, "r") as f: cache = json.load(f) else: cache = {}
-
+if os.path.exists(CACHE_FILE):
+    with open(CACHE_FILE, "r") as f:
+        cache = json.load(f)
+else:
+    cache = {}
 Telegram Bot Client
 
 bot = Client("tg_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)

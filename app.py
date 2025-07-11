@@ -1,132 +1,90 @@
 import os
+import logging
 import random
 import asyncio
-import logging
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from celery import Celery
 from yt_dlp import YoutubeDL
 
-# === Logging Setup ===
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.FileHandler("api_logs.log", encoding="utf-8"),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger("api")
+app = FastAPI(title="YouTube Audio Downloader", version="5.0.0")
 
-# === Constants ===
-DOWNLOAD_DIR = "downloads"
-os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-
-COMMON_EXTS = ["m4a", "webm", "mp3", "opus"]
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1"
-]
-YOUTUBE_CLIENTS = ["web", "web_music", "mweb", "android", "ios", "tv"]
-
-# === FastAPI Setup ===
-app = FastAPI(title="DeadlineTech Downloader", version="1.0.0")
+# CORS setup
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# === Celery Setup ===
-celery_app = Celery("yt_dl_tasks", broker="redis://localhost:6379/0", backend="redis://localhost:6379/0")
+# Logging setup
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s"
+)
+logger = logging.getLogger(__name__)
 
+# Directories
+DOWNLOAD_DIR = "downloads"
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# === Helper Functions ===
-def get_random_user_agent():
-    return random.choice(USER_AGENTS)
+# Celery config
+celery_app = Celery("tasks", broker="redis://localhost:6379/0", backend="redis://localhost:6379/0")
 
-def find_downloaded_file(video_id):
-    for ext in COMMON_EXTS:
+# Download helpers
+def get_audio_path(video_id):
+    for ext in ["m4a", "webm", "mp3", "opus"]:
         path = os.path.join(DOWNLOAD_DIR, f"{video_id}.{ext}")
         if os.path.exists(path) and os.path.getsize(path) > 100000:
             return path
     return None
 
-def get_marker_file(video_id):
-    return os.path.join(DOWNLOAD_DIR, f"{video_id}_ready.txt")
-
-
-# === Celery Task ===
-@celery_app.task(name="download_audio_task")
-def download_audio_task(video_id):
+@celery_app.task(name="download_task")
+def download_task(video_id):
     url = f"https://www.youtube.com/watch?v={video_id}"
-    output_template = os.path.join(DOWNLOAD_DIR, f"{video_id}.%(ext)s")
-
-    ydl_opts = {
+    filepath = os.path.join(DOWNLOAD_DIR, f"{video_id}.%(ext)s")
+    opts = {
         "format": "bestaudio[ext=m4a]/bestaudio/best",
-        "outtmpl": output_template,
+        "outtmpl": filepath,
         "quiet": True,
         "no_warnings": True,
-        "cookiefile": "cookies/cookies.txt" if os.path.exists("cookies/cookies.txt") else None,
-        "retries": 10,
-        "fragment_retries": 10,
-        "file_access_retries": 10,
-        "prefer_insecure": True,
-        "no_cache_dir": True,
-        "ignoreerrors": True,
-        "noplaylist": True,
+        "retries": 5,
+        "fragment_retries": 5,
         "concurrent_fragment_downloads": 5,
-        "force_overwrites": True,
-        "addheader": [f"User-Agent:{get_random_user_agent()}"],
-        "extractor_args": {
-            "youtube": {
-                "player_client": random.choice(YOUTUBE_CLIENTS)
-            }
-        }
+        "noplaylist": True,
+        "cookiefile": "cookies/cookies.txt" if os.path.exists("cookies/cookies.txt") else None,
     }
 
     try:
-        with YoutubeDL(ydl_opts) as ydl:
+        with YoutubeDL(opts) as ydl:
             ydl.download([url])
-
-        path = find_downloaded_file(video_id)
-        if path:
-            with open(get_marker_file(video_id), "w") as f:
-                f.write(path)
-            return {"status": "completed", "file": path}
-        else:
-            return {"status": "failed", "error": "file not found"}
-
     except Exception as e:
-        return {"status": "failed", "error": str(e)}
+        logger.error(f"[ERROR] Failed to download: {e}")
+        return "failed"
 
+    return "done"
 
-# === API Endpoints ===
+# API endpoints
 
 @app.get("/")
-def home():
-    return {"status": "API Running", "uptime": f"{os.uname().sysname} {os.uname().release}"}
+def root():
+    return {"status": "API is live"}
 
 @app.get("/song/{video_id}")
-async def song_stream(video_id: str):
-    cached = find_downloaded_file(video_id)
-    if cached:
-        return FileResponse(cached, media_type="audio/mpeg")
+async def get_song(video_id: str, api: str = ""):
+    file_path = get_audio_path(video_id)
+    if file_path:
+        return FileResponse(file_path, media_type="audio/mpeg")
 
-    task = download_audio_task.delay(video_id)
-    timeout = 30  # seconds
-    waited = 0
+    task = download_task.delay(video_id)
 
-    while waited < timeout:
-        result = celery_app.AsyncResult(task.id)
-        if result.ready() and result.successful():
-            cached = find_downloaded_file(video_id)
-            if cached:
-                return FileResponse(cached, media_type="audio/mpeg")
+    # Wait max 30s for file
+    for _ in range(30):
         await asyncio.sleep(1)
-        waited += 1
+        file_path = get_audio_path(video_id)
+        if file_path:
+            return FileResponse(file_path, media_type="audio/mpeg")
 
-    raise HTTPException(status_code=202, detail="Still processing, try again later")
+    raise HTTPException(status_code=202, detail="Processing, try again in few seconds.")

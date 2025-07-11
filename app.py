@@ -6,7 +6,7 @@ from pyrogram import Client
 from yt_dlp import YoutubeDL
 from dotenv import load_dotenv
 
-#Load environment variables from .env
+# Load environment variables from .env
 
 load_dotenv()
 

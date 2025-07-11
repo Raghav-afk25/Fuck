@@ -15,7 +15,13 @@ API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
 
-app = FastAPI() DOWNLOAD_DIR = "downloads" CACHE_FILE = "cache.json" COOKIE_FILE = "cookies/cookies.txt" os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+app = FastAPI()
+
+DOWNLOAD_DIR = "downloads"
+CACHE_FILE = "cache.json"
+COOKIE_FILE = "cookies/cookies.txt"
+
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 Load download cache
 

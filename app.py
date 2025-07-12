@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import yt_dlp
 from concurrent.futures import ThreadPoolExecutor
 
-# Logging setup
+# ========================= 🔧 Logging Setup ============================
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -22,14 +22,26 @@ logging.basicConfig(
 )
 logger = logging.getLogger("api")
 
+# ========================= 📁 Configs & Globals ============================
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 COMMON_EXTS = ["m4a", "webm", "mp3", "opus"]
+
 USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
-    "Mozilla/5.0 (X11; Linux x86_64)"
+    # Chrome - Windows
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.6422.112 Safari/537.36",
+    # Chrome - MacOS
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.6422.113 Safari/537.36",
+    # Chrome - Linux
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.6422.114 Safari/537.36",
+    # Edge - Windows
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.6422.113 Safari/537.36 Edg/125.0.2535.92",
+    # Chrome - Android
+    "Mozilla/5.0 (Linux; Android 12; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.6422.112 Mobile Safari/537.36",
+    # Chrome - iPhone
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/125.0.6422.112 Mobile/15E148 Safari/604.1",
 ]
+
 YOUTUBE_CLIENTS = ["mweb", "web", "web_music", "android", "ios", "tv"]
 
 COOKIE_DIR = "cookies"
@@ -38,8 +50,8 @@ COOKIE_FILES = [f for f in glob.glob(f"{COOKIE_DIR}/*.txt")]
 executor = ThreadPoolExecutor(max_workers=16)
 download_locks = {}
 
-# FastAPI setup
-app = FastAPI(title="Ultra Optimized API", version="1.1.4")
+# ========================= 🌐 FastAPI Setup ============================
+app = FastAPI(title="Ultra Optimized API", version="1.1.5")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -47,6 +59,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ========================= 🧠 Helper Functions ============================
 
 def get_random_user_agent():
     return random.choice(USER_AGENTS)
@@ -66,9 +80,12 @@ def sync_download(video_id):
     url = f"https://www.youtube.com/watch?v={video_id}"
     out = os.path.join(DOWNLOAD_DIR, f"{video_id}.%(ext)s")
 
-    for cookiefile in COOKIE_FILES + [None]:
+    cookie_try_list = COOKIE_FILES + [None]
+    random.shuffle(cookie_try_list)
+
+    for cookiefile in cookie_try_list:
         ydl_opts = {
-            "format": "bestaudio[ext=m4a]",
+            "format": "bestaudio[ext=m4a]/bestaudio/best",
             "outtmpl": out,
             "quiet": True,
             "no_warnings": True,
@@ -83,18 +100,26 @@ def sync_download(video_id):
                 "youtube": {
                     "player_client": random.choice(YOUTUBE_CLIENTS)
                 }
-            }
+            },
+            "postprocessors": [
+                {
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "mp3",
+                    "preferredquality": "192",
+                }
+            ],
         }
 
         try:
-            logger.info(f"➡️ Downloading: {video_id} with cookie: {cookiefile}")
+            cookie_name = os.path.basename(cookiefile) if cookiefile else "❌ No Cookie"
+            logger.info(f"➡️ Trying: {video_id} with cookie: {cookie_name}")
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
             if find_file(video_id):
-                logger.info(f"✅ Success: {video_id}")
+                logger.info(f"✅ Downloaded: {video_id} with cookie: {cookie_name}")
                 break
         except Exception as e:
-            logger.warning(f"❌ Failed with {cookiefile}: {str(e)}")
+            logger.warning(f"❌ Failed with cookie {cookie_name}: {e}")
             continue
 
 async def delete_file_later(path: str, delay: int = 3600):
@@ -110,6 +135,8 @@ async def delete_file_later(path: str, delay: int = 3600):
                 logger.info(f"🧹 Deleted old file: {path}")
     except Exception as e:
         logger.warning(f"⚠️ Failed deleting {path}: {e}")
+
+# ========================= 🚀 API Routes ============================
 
 @app.get("/download/song/{video_id}")
 async def download_song(video_id: str, background_tasks: BackgroundTasks):

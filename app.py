@@ -1,25 +1,30 @@
+
 import os
+import glob
 import logging
+import asyncio
 import random
 import time
-from fastapi import FastAPI, BackgroundTasks
+import platform
+from datetime import datetime
+from fastapi import FastAPI, HTTPException, Request, BackgroundTasks
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from celery import Celery
 import yt_dlp
 
-# -------------------- Logging Setup --------------------
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.FileHandler("api_logs.log", encoding="utf-8"), logging.StreamHandler()]
+    handlers=[
+        logging.FileHandler("api_logs.log", encoding="utf-8"),
+        logging.StreamHandler()
+    ]
 )
 logger = logging.getLogger("api")
 
-# -------------------- Directories & Constants --------------------
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-
 COMMON_EXTS = ["m4a", "webm", "mp3", "opus"]
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
@@ -28,9 +33,7 @@ USER_AGENTS = [
 ]
 YOUTUBE_CLIENTS = ["mweb", "web", "web_music", "android", "ios", "tv"]
 
-# -------------------- FastAPI Setup --------------------
-app = FastAPI(title="Turbo YouTube Audio Downloader", version="1.0.0")
-
+app = FastAPI(title="Celery Boosted API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -39,10 +42,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# -------------------- Celery Setup --------------------
 celery_app = Celery("yt_dl", broker="redis://localhost:6379/0", backend="redis://localhost:6379/0")
 
-# -------------------- Utility Functions --------------------
 def get_random_user_agent():
     return random.choice(USER_AGENTS)
 
@@ -58,13 +59,11 @@ def delayed_delete(path, delay=3600):
         time.sleep(delay)
         if os.path.exists(path):
             os.remove(path)
-            print(f"✅ Deleted: {path}")
     except Exception as e:
         print(f"❌ Delete failed: {e}")
 
-# -------------------- Celery Download Task --------------------
 @celery_app.task
-def download_task(video_id):
+def download_audio_task(video_id):
     url = f"https://www.youtube.com/watch?v={video_id}"
     out = os.path.join(DOWNLOAD_DIR, f"{video_id}.%(ext)s")
 
@@ -102,13 +101,11 @@ def download_task(video_id):
     except Exception as e:
         return {"status": "failed", "error": str(e)}
 
-# -------------------- Main Download Endpoint --------------------
 @app.get("/download/song/{video_id}")
 async def download_audio(video_id: str, background_tasks: BackgroundTasks):
     file = find_file(video_id)
-
     if file:
-        background_tasks.add_task(delayed_delete, file, delay=3600)  # delete after 1 hour
+        background_tasks.add_task(delayed_delete, file, delay=3600)
         return FileResponse(
             path=file,
             media_type="application/octet-stream",
@@ -118,13 +115,12 @@ async def download_audio(video_id: str, background_tasks: BackgroundTasks):
         )
 
     try:
-        download_task.delay(video_id)
+        download_audio_task.delay(video_id)
     except:
         pass
 
-    return ""  # silent
+    return ""
 
-# -------------------- Health Check --------------------
 @app.get("/")
-def health():
+def root():
     return {"status": "running ✅"}

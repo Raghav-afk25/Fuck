@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from celery import Celery
 import yt_dlp
 
-# 🔧 Logging Setup
+# 🧾 Logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -32,7 +32,7 @@ USER_AGENTS = [
 YOUTUBE_CLIENTS = ["mweb", "web", "web_music", "android", "ios", "tv"]
 
 # 🚀 FastAPI App
-app = FastAPI(title="YouTube Audio Downloader API", version="1.0.0")
+app = FastAPI(title="YouTube Audio Downloader", version="1.0.0")
 
 # 🌍 CORS
 app.add_middleware(
@@ -43,10 +43,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 🧠 Celery
+# 🧠 Celery App
 celery_app = Celery("yt_dl_tasks", broker="redis://localhost:6379/0", backend="redis://localhost:6379/0")
 
-# 🔍 Utility
+# 🔍 Utils
 def get_random_user_agent():
     return random.choice(USER_AGENTS)
 
@@ -60,7 +60,7 @@ def find_downloaded_file(video_id):
 def validate_downloaded_file(file_path, video_id):
     return os.path.exists(file_path) and os.path.getsize(file_path) > 100000
 
-# 📥 Celery Task
+# 🎯 Celery Background Download Task
 @celery_app.task(name="download_audio_task")
 def download_audio_task(video_id):
     url = f"https://www.youtube.com/watch?v={video_id}"
@@ -93,7 +93,6 @@ def download_audio_task(video_id):
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
-
         downloaded_file = find_downloaded_file(video_id)
         if downloaded_file and validate_downloaded_file(downloaded_file, video_id):
             return {"status": "completed", "file_path": downloaded_file}
@@ -101,31 +100,31 @@ def download_audio_task(video_id):
     except Exception as e:
         return {"status": "failed", "error": str(e)}
 
-# 🔗 /song/{video_id} — Direct Download Endpoint
-@app.get("/song/{video_id}")
-async def song_direct_download(video_id: str):
+# ✅ /download/song/{video_id} — Exactly Like You Wanted
+@app.get("/download/song/{video_id}")
+async def song_download_like_prod(video_id: str):
     cached_file = find_downloaded_file(video_id)
+
     if cached_file and validate_downloaded_file(cached_file, video_id):
         return FileResponse(
             path=cached_file,
-            media_type="application/octet-stream",  # 🔽 Force download
+            media_type="application/octet-stream",
             filename=f"{video_id}.mp3",
             headers={
                 "Content-Disposition": f"attachment; filename={video_id}.mp3"
             }
         )
 
+    # 🔇 Silent background task (no message if file not ready)
     try:
         download_audio_task.delay(video_id)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Celery task failed: {str(e)}")
+        logger.error(f"Celery task error: {e}")
+        pass
 
-    raise HTTPException(
-        status_code=202,
-        detail="File is being downloaded in background. Try again shortly."
-    )
+    return  # Silent fallback (no 202, no error)
 
-# Optional Health Route
+# 🫡 Healthcheck
 @app.get("/")
 def root():
-    return {"status": "API is live"}
+    return {"status": "running"}

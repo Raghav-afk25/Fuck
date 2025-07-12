@@ -8,16 +8,16 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import yt_dlp
 
-# Logging
+# Setup logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler("fastapi.log", encoding="utf-8")
+        logging.FileHandler("yt-api.log", encoding="utf-8")
     ]
 )
-logger = logging.getLogger("yt-turbo")
+logger = logging.getLogger("ytapi")
 
 # Constants
 DOWNLOAD_DIR = "downloads"
@@ -25,8 +25,8 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 COMMON_EXTS = ["mp3", "m4a", "webm", "opus"]
 COOKIE_FILES = sorted(glob.glob("cookies/*.txt"))
 
-# FastAPI app
-app = FastAPI(title="VC-Turbo YouTube API", version="7.1")
+# FastAPI
+app = FastAPI(title="YT Turbo API", version="1.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -35,7 +35,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 🔁 Clean only small or old files (safe)
+# Clean-up function
 def clean_old_files():
     now = time.time()
     for file in os.listdir(DOWNLOAD_DIR):
@@ -44,43 +44,44 @@ def clean_old_files():
             if os.path.isfile(path):
                 size = os.path.getsize(path)
                 age = now - os.path.getmtime(path)
-                if size < 1_000_000 or age > 3600:
+
+                # ⚠️ Don't touch very recent files
+                if age < 10:
+                    continue
+
+                if size < 1_000_000:
                     os.remove(path)
-                    logger.info(f"🧹 Cleaned: {path} (Size: {size}, Age: {age:.0f}s)")
+                    logger.info(f"🧹 Deleted small file: {path} (size={size}, age={age:.0f}s)")
+                elif age > 3600:
+                    os.remove(path)
+                    logger.info(f"🧹 Deleted old file: {path} (age={age:.0f}s)")
         except FileNotFoundError:
             logger.warning(f"⚠️ File already deleted: {path}")
         except Exception as e:
-            logger.error(f"❌ Failed to delete {path}: {e}")
+            logger.error(f"❌ Error deleting {path}: {e}")
 
-# ✅ Find if valid downloaded file exists
+# Check if file exists and is valid
 def find_file(video_id):
     for ext in COMMON_EXTS:
         path = os.path.join(DOWNLOAD_DIR, f"{video_id}.{ext}")
-        if os.path.exists(path) and os.path.getsize(path) >= 1_000_000:
-            return path
-        elif os.path.exists(path):
-            try:
-                os.remove(path)
-                logger.warning(f"🗑️ Deleted too small (<1MB): {path}")
-            except:
-                pass
+        if os.path.exists(path):
+            size = os.path.getsize(path)
+            if size >= 1_000_000:
+                return path
     return None
 
-# ⚡ Fast & direct download
+# Download the song using yt-dlp
 def download_song(video_id):
     url = f"https://www.youtube.com/watch?v={video_id}"
     outtmpl = os.path.join(DOWNLOAD_DIR, f"{video_id}.%(ext)s")
 
-    cookie = COOKIE_FILES[0] if COOKIE_FILES else None
-    fallback = COOKIE_FILES[1] if len(COOKIE_FILES) > 1 else None
-
-    for ck in [cookie, fallback, None]:
+    for cookie in COOKIE_FILES + [None]:
         opts = {
             "format": "bestaudio[ext=m4a]/bestaudio/best",
             "outtmpl": outtmpl,
             "quiet": True,
             "no_warnings": True,
-            "cookiefile": ck,
+            "cookiefile": cookie,
             "retries": 1,
             "fragment_retries": 1,
             "file_access_retries": 1,
@@ -99,21 +100,20 @@ def download_song(video_id):
                 "preferredquality": "128"
             }]
         }
-
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 ydl.download([url])
         except Exception as e:
-            logger.warning(f"❌ Download failed with {ck}: {e}")
+            logger.warning(f"❌ Failed with cookie {cookie}: {e}")
             continue
 
-        found = find_file(video_id)
-        if found:
-            return found
+        file = find_file(video_id)
+        if file:
+            return file
 
-    raise Exception("All attempts failed or file invalid.")
+    raise Exception("Download failed with all cookies.")
 
-# 🧠 Main endpoint for VC bots
+# Download endpoint
 @app.get("/download/song/{video_id}")
 def trigger_download(video_id: str):
     clean_old_files()
@@ -128,11 +128,11 @@ def trigger_download(video_id: str):
     return FileResponse(
         file,
         media_type="application/octet-stream",
-        filename=f"{video_id}.mp3",
-        headers={"Content-Disposition": f'attachment; filename="{video_id}.mp3"'}
+        filename=os.path.basename(file),
+        headers={"Content-Disposition": f'attachment; filename="{os.path.basename(file)}"'}
     )
 
-# Check cookie status
+# Cookie health checker
 @app.get("/cookie-health")
 def cookie_status():
     test_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
@@ -151,7 +151,6 @@ def cookie_status():
             result.append({"cookie": os.path.basename(cookie), "status": f"❌ {str(e).splitlines()[0]}"})
     return JSONResponse(result)
 
-# Root
 @app.get("/")
 def root():
-    return {"status": "✅ API Live", "cookies": len(COOKIE_FILES)}
+    return {"status": "✅ API Live", "cookies_found": len(COOKIE_FILES)}

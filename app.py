@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import yt_dlp
 from concurrent.futures import ThreadPoolExecutor
 
-# Logging setup
+# Setup logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -21,9 +21,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger("api")
 
+# Directories
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-COMMON_EXTS = ["m4a", "webm", "mp3", "opus"]
+COMMON_EXTS = ["mp3", "m4a", "webm", "opus"]
+
+# Constants
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
@@ -31,14 +34,15 @@ USER_AGENTS = [
 ]
 YOUTUBE_CLIENTS = ["mweb", "web", "web_music", "android", "ios", "tv"]
 
-COOKIE_DIR = "cookies"
-COOKIE_FILES = [f for f in glob.glob(f"{COOKIE_DIR}/*.txt")]
+# Load all cookies
+COOKIE_FILES = sorted(
+    glob.glob("cookies/*.txt"),
+    key=lambda x: os.path.getmtime(x)  # Sorted by latest modified
+)
 
-# Limit concurrency for 4 CPU
-executor = ThreadPoolExecutor(max_workers=80)
+executor = ThreadPoolExecutor(max_workers=100)
 
-# FastAPI setup
-app = FastAPI(title="Ultra Optimized API", version="1.0.9")
+app = FastAPI(title="Turbo Audio Downloader", version="5.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -47,11 +51,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Random User-Agent
 def get_random_user_agent():
     return random.choice(USER_AGENTS)
 
-# Check if valid file exists
 def find_file(video_id):
     for ext in COMMON_EXTS:
         path = os.path.join(DOWNLOAD_DIR, f"{video_id}.{ext}")
@@ -60,17 +62,17 @@ def find_file(video_id):
                 return path
             else:
                 os.remove(path)
-                print(f"⚠️ Deleted incomplete file: {path}")
+                logger.warning(f"⚠️ Deleted incomplete file: {path}")
     return None
 
-# Download logic
 def sync_download(video_id):
     url = f"https://www.youtube.com/watch?v={video_id}"
     out = os.path.join(DOWNLOAD_DIR, f"{video_id}.%(ext)s")
 
     for cookiefile in COOKIE_FILES + [None]:
+        logger.info(f"🧪 Trying with cookie: {cookiefile}")
         ydl_opts = {
-            "format": "bestaudio[ext=m4a]",
+            "format": "bestaudio[ext=m4a]/bestaudio/best",
             "outtmpl": out,
             "quiet": True,
             "no_warnings": True,
@@ -87,6 +89,11 @@ def sync_download(video_id):
             "noplaylist": True,
             "nopart": True,
             "addheader": [f"User-Agent:{get_random_user_agent()}"],
+            "postprocessors": [{
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "192",
+            }],
             "extractor_args": {
                 "youtube": {
                     "player_client": random.choice(YOUTUBE_CLIENTS)
@@ -95,33 +102,39 @@ def sync_download(video_id):
         }
 
         try:
-            logger.info(f"Trying with cookies: {cookiefile}")
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
             if find_file(video_id):
-                logger.info(f"✅ Success with cookies: {cookiefile}")
+                logger.info(f"✅ Success using cookie: {cookiefile}")
                 break
         except Exception as e:
-            logger.warning(f"❌ Failed with {cookiefile}: {str(e)}")
-            continue
+            logger.warning(f"❌ Failed with cookie {cookiefile}: {str(e)}")
 
-# Auto-delete after delay
+    # Clean leftover files
+    for ext in ["webm", "m4a", "opus"]:
+        temp = os.path.join(DOWNLOAD_DIR, f"{video_id}.{ext}")
+        if os.path.exists(temp):
+            try:
+                os.remove(temp)
+                logger.info(f"🧹 Removed temp: {temp}")
+            except:
+                pass
+
 def delete_file_later(path: str, delay: int = 3600):
     time.sleep(delay)
     if os.path.exists(path):
         try:
             os.remove(path)
-            print(f"🧹 Deleted {path}")
+            logger.info(f"🧹 Auto-deleted: {path}")
         except Exception as e:
-            print(f"⚠️ Failed to delete {path}: {e}")
+            logger.warning(f"⚠️ Auto-delete failed: {path} - {e}")
 
-# Main endpoint
 @app.get("/download/song/{video_id}")
 async def download_song(video_id: str, background_tasks: BackgroundTasks):
     file = find_file(video_id)
     if not file:
+        await asyncio.sleep(random.uniform(0.05, 0.15))
         loop = asyncio.get_event_loop()
-        await asyncio.sleep(random.uniform(0.05, 0.2))  # stagger protection
         await loop.run_in_executor(executor, sync_download, video_id)
         file = find_file(video_id)
         if not file:
@@ -136,7 +149,6 @@ async def download_song(video_id: str, background_tasks: BackgroundTasks):
         headers={"Content-Disposition": f'attachment; filename="{video_id}.mp3"'}
     )
 
-# Optional: Cookie health check
 @app.get("/cookie-health")
 async def cookie_health_check():
     sample_url = "https://www.youtube.com/watch?v=2Vv-BfVoq4g"
@@ -160,4 +172,4 @@ async def cookie_health_check():
 
 @app.get("/")
 def root():
-    return {"status": "Ultra Optimized API 🧠💨"}
+    return {"status": "Running Turbo API 🚀"}

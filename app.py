@@ -3,7 +3,7 @@ import glob
 import logging
 import asyncio
 import random
-import time
+from threading import Lock
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -34,11 +34,14 @@ YOUTUBE_CLIENTS = ["mweb", "web", "web_music", "android", "ios", "tv"]
 COOKIE_DIR = "cookies"
 COOKIE_FILES = [f for f in glob.glob(f"{COOKIE_DIR}/*.txt")]
 
-# Limit concurrency for 4 CPU
-executor = ThreadPoolExecutor(max_workers=80)
+# 🔧 Lowered for CPU load
+executor = ThreadPoolExecutor(max_workers=16)
+
+# Prevents 2x download
+download_locks = {}
 
 # FastAPI setup
-app = FastAPI(title="Ultra Optimized API", version="1.0.9")
+app = FastAPI(title="Ultra Optimized API", version="1.1.3")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -47,23 +50,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Random User-Agent
 def get_random_user_agent():
     return random.choice(USER_AGENTS)
 
-# Check if valid file exists
 def find_file(video_id):
     for ext in COMMON_EXTS:
         path = os.path.join(DOWNLOAD_DIR, f"{video_id}.{ext}")
         if os.path.exists(path):
-            if os.path.getsize(path) >= 1_000_000:
+            size = os.path.getsize(path)
+            if size >= 200_000:
                 return path
             else:
-                os.remove(path)
-                print(f"⚠️ Deleted incomplete file: {path}")
+                logger.warning(f"⚠️ Skipping too small file (<200KB): {path}")
     return None
 
-# Download logic
 def sync_download(video_id):
     url = f"https://www.youtube.com/watch?v={video_id}"
     out = os.path.join(DOWNLOAD_DIR, f"{video_id}.%(ext)s")
@@ -75,17 +75,11 @@ def sync_download(video_id):
             "quiet": True,
             "no_warnings": True,
             "cookiefile": cookiefile,
-            "retries": 10,
-            "fragment_retries": 10,
-            "file_access_retries": 10,
-            "nocheckcertificate": True,
-            "prefer_insecure": True,
-            "no_cache_dir": True,
+            "retries": 3,
             "ignoreerrors": True,
-            "concurrent_fragment_downloads": 10,
-            "force_overwrites": True,
             "noplaylist": True,
             "nopart": True,
+            "no_cache_dir": True,
             "addheader": [f"User-Agent:{get_random_user_agent()}"],
             "extractor_args": {
                 "youtube": {
@@ -95,32 +89,32 @@ def sync_download(video_id):
         }
 
         try:
-            logger.info(f"Trying with cookies: {cookiefile}")
+            logger.info(f"➡️ Downloading: {video_id} with cookie: {cookiefile}")
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
             if find_file(video_id):
-                logger.info(f"✅ Success with cookies: {cookiefile}")
+                logger.info(f"✅ Success: {video_id}")
                 break
         except Exception as e:
             logger.warning(f"❌ Failed with {cookiefile}: {str(e)}")
             continue
 
-# Auto-delete after delay
-def delete_file_later(path: str, delay: int = 3600):
-    time.sleep(delay)
+async def delete_file_later(path: str, delay: int = 600):
+    await asyncio.sleep(delay)
     if os.path.exists(path):
         try:
             os.remove(path)
-            print(f"🧹 Deleted {path}")
+            logger.info(f"🧹 Deleted {path}")
         except Exception as e:
-            print(f"⚠️ Failed to delete {path}: {e}")
+            logger.error(f"⚠️ Failed to delete {path}: {e}")
 
-# Main endpoint (No 2x Download)
 @app.get("/download/song/{video_id}")
 async def download_song(video_id: str, background_tasks: BackgroundTasks):
+    logger.info(f"📥 API Hit: {video_id}")
+
     file = find_file(video_id)
     if file:
-        background_tasks.add_task(delete_file_later, file, 3600)
+        background_tasks.add_task(delete_file_later, file, 600)
         return FileResponse(
             path=file,
             media_type="application/octet-stream",
@@ -128,25 +122,34 @@ async def download_song(video_id: str, background_tasks: BackgroundTasks):
             headers={"Content-Disposition": f'attachment; filename="{video_id}.mp3"'}
         )
 
-    # File not found, do download
-    loop = asyncio.get_event_loop()
-    await asyncio.sleep(random.uniform(0.05, 0.2))  # stagger protection
-    await loop.run_in_executor(executor, sync_download, video_id)
+    lock = download_locks.setdefault(video_id, Lock())
+    with lock:
+        file = find_file(video_id)
+        if file:
+            background_tasks.add_task(delete_file_later, file, 600)
+            return FileResponse(
+                path=file,
+                media_type="application/octet-stream",
+                filename=f"{video_id}.mp3",
+                headers={"Content-Disposition": f'attachment; filename="{video_id}.mp3"'}
+            )
 
-    # Final file check
-    file = find_file(video_id)
-    if not file:
-        raise HTTPException(status_code=500, detail="Download failed")
+        loop = asyncio.get_event_loop()
+        await asyncio.sleep(random.uniform(0.05, 0.2))  # minor stagger
+        await loop.run_in_executor(executor, sync_download, video_id)
 
-    background_tasks.add_task(delete_file_later, file, 3600)
-    return FileResponse(
-        path=file,
-        media_type="application/octet-stream",
-        filename=f"{video_id}.mp3",
-        headers={"Content-Disposition": f'attachment; filename="{video_id}.mp3"'}
-    )
+        file = find_file(video_id)
+        if not file:
+            raise HTTPException(status_code=500, detail="Download failed")
 
-# Optional: Cookie health check
+        background_tasks.add_task(delete_file_later, file, 600)
+        return FileResponse(
+            path=file,
+            media_type="application/octet-stream",
+            filename=f"{video_id}.mp3",
+            headers={"Content-Disposition": f'attachment; filename="{video_id}.mp3"'}
+        )
+
 @app.get("/cookie-health")
 async def cookie_health_check():
     sample_url = "https://www.youtube.com/watch?v=2Vv-BfVoq4g"
@@ -165,7 +168,10 @@ async def cookie_health_check():
                 ydl.extract_info(sample_url, download=False)
             results.append({"cookie": os.path.basename(cookie), "status": "✅ Working"})
         except Exception as e:
-            results.append({"cookie": os.path.basename(cookie), "status": f"❌ Dead - {str(e).splitlines()[0]}"})
+            results.append({
+                "cookie": os.path.basename(cookie),
+                "status": f"❌ Dead - {str(e).splitlines()[0]}"
+            })
     return JSONResponse(results)
 
 @app.get("/")

@@ -115,20 +115,30 @@ def delete_file_later(path: str, delay: int = 3600):
         except Exception as e:
             print(f"⚠️ Failed to delete {path}: {e}")
 
-# Main endpoint
+# Main endpoint (No 2x Download)
 @app.get("/download/song/{video_id}")
 async def download_song(video_id: str, background_tasks: BackgroundTasks):
     file = find_file(video_id)
+    if file:
+        background_tasks.add_task(delete_file_later, file, 3600)
+        return FileResponse(
+            path=file,
+            media_type="application/octet-stream",
+            filename=f"{video_id}.mp3",
+            headers={"Content-Disposition": f'attachment; filename="{video_id}.mp3"'}
+        )
+
+    # File not found, do download
+    loop = asyncio.get_event_loop()
+    await asyncio.sleep(random.uniform(0.05, 0.2))  # stagger protection
+    await loop.run_in_executor(executor, sync_download, video_id)
+
+    # Final file check
+    file = find_file(video_id)
     if not file:
-        loop = asyncio.get_event_loop()
-        await asyncio.sleep(random.uniform(0.05, 0.2))  # stagger protection
-        await loop.run_in_executor(executor, sync_download, video_id)
-        file = find_file(video_id)
-        if not file:
-            raise HTTPException(status_code=500, detail="Download failed")
+        raise HTTPException(status_code=500, detail="Download failed")
 
     background_tasks.add_task(delete_file_later, file, 3600)
-
     return FileResponse(
         path=file,
         media_type="application/octet-stream",

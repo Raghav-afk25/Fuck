@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import yt_dlp
 from concurrent.futures import ThreadPoolExecutor
 
-# Setup logging
+# Logger Setup
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -26,23 +26,14 @@ DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 COMMON_EXTS = ["mp3", "m4a", "webm", "opus"]
 
-# Constants
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
-    "Mozilla/5.0 (X11; Linux x86_64)"
-]
-YOUTUBE_CLIENTS = ["mweb", "web", "web_music", "android", "ios", "tv"]
+# Cookie Load
+COOKIE_FILES = sorted(glob.glob("cookies/*.txt"))
 
-# Load all cookies
-COOKIE_FILES = sorted(
-    glob.glob("cookies/*.txt"),
-    key=lambda x: os.path.getmtime(x)  # Sorted by latest modified
-)
-
+# Thread Pool
 executor = ThreadPoolExecutor(max_workers=100)
 
-app = FastAPI(title="Turbo Audio Downloader", version="5.0")
+# FastAPI App
+app = FastAPI(title="Turbo Downloader", version="5.1")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -50,6 +41,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Helpers
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+    "Mozilla/5.0 (X11; Linux x86_64)"
+]
+
+YOUTUBE_CLIENTS = ["mweb", "web", "web_music", "android", "ios", "tv"]
 
 def get_random_user_agent():
     return random.choice(USER_AGENTS)
@@ -62,15 +62,19 @@ def find_file(video_id):
                 return path
             else:
                 os.remove(path)
-                logger.warning(f"⚠️ Deleted incomplete file: {path}")
+                logger.warning(f"⚠️ Deleted incomplete: {path}")
     return None
 
 def sync_download(video_id):
     url = f"https://www.youtube.com/watch?v={video_id}"
     out = os.path.join(DOWNLOAD_DIR, f"{video_id}.%(ext)s")
 
-    for cookiefile in COOKIE_FILES + [None]:
-        logger.info(f"🧪 Trying with cookie: {cookiefile}")
+    cookies_list = COOKIE_FILES.copy()
+    random.shuffle(cookies_list)
+    cookies_list.append(None)
+
+    for cookiefile in cookies_list:
+        logger.info(f"🧪 Trying cookie: {cookiefile}")
         ydl_opts = {
             "format": "bestaudio[ext=m4a]/bestaudio/best",
             "outtmpl": out,
@@ -104,13 +108,18 @@ def sync_download(video_id):
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
-            if find_file(video_id):
-                logger.info(f"✅ Success using cookie: {cookiefile}")
-                break
         except Exception as e:
-            logger.warning(f"❌ Failed with cookie {cookiefile}: {str(e)}")
+            logger.warning(f"❌ Failed with {cookiefile}: {str(e)}")
+            continue
 
-    # Clean leftover files
+        downloaded = find_file(video_id)
+        if downloaded:
+            logger.info(f"✅ Success with cookie: {cookiefile}")
+            break
+        else:
+            logger.warning(f"⚠️ No file found for cookie: {cookiefile}")
+
+    # Cleanup temp
     for ext in ["webm", "m4a", "opus"]:
         temp = os.path.join(DOWNLOAD_DIR, f"{video_id}.{ext}")
         if os.path.exists(temp):
@@ -127,7 +136,7 @@ def delete_file_later(path: str, delay: int = 3600):
             os.remove(path)
             logger.info(f"🧹 Auto-deleted: {path}")
         except Exception as e:
-            logger.warning(f"⚠️ Auto-delete failed: {path} - {e}")
+            logger.warning(f"⚠️ Failed auto-delete: {path} - {e}")
 
 @app.get("/download/song/{video_id}")
 async def download_song(video_id: str, background_tasks: BackgroundTasks):
@@ -150,8 +159,8 @@ async def download_song(video_id: str, background_tasks: BackgroundTasks):
     )
 
 @app.get("/cookie-health")
-async def cookie_health_check():
-    sample_url = "https://www.youtube.com/watch?v=2Vv-BfVoq4g"
+async def cookie_health():
+    test_url = "https://www.youtube.com/watch?v=2Vv-BfVoq4g"
     results = []
     for cookie in COOKIE_FILES:
         ydl_opts = {
@@ -164,12 +173,12 @@ async def cookie_health_check():
         }
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.extract_info(sample_url, download=False)
+                ydl.extract_info(test_url, download=False)
             results.append({"cookie": os.path.basename(cookie), "status": "✅ Working"})
         except Exception as e:
-            results.append({"cookie": os.path.basename(cookie), "status": f"❌ Dead - {str(e).splitlines()[0]}"})
+            results.append({"cookie": os.path.basename(cookie), "status": f"❌ {str(e).splitlines()[0]}"})
     return JSONResponse(results)
 
 @app.get("/")
 def root():
-    return {"status": "Running Turbo API 🚀"}
+    return {"status": "Turbo Audio API Running 🚀"}

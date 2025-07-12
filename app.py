@@ -3,6 +3,7 @@ import glob
 import logging
 import asyncio
 import random
+import time
 from threading import Lock
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse, JSONResponse
@@ -34,14 +35,11 @@ YOUTUBE_CLIENTS = ["mweb", "web", "web_music", "android", "ios", "tv"]
 COOKIE_DIR = "cookies"
 COOKIE_FILES = [f for f in glob.glob(f"{COOKIE_DIR}/*.txt")]
 
-# 🔧 Lowered for CPU load
 executor = ThreadPoolExecutor(max_workers=16)
-
-# Prevents 2x download
 download_locks = {}
 
 # FastAPI setup
-app = FastAPI(title="Ultra Optimized API", version="1.1.3")
+app = FastAPI(title="Ultra Optimized API", version="1.1.4")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -99,22 +97,26 @@ def sync_download(video_id):
             logger.warning(f"❌ Failed with {cookiefile}: {str(e)}")
             continue
 
-async def delete_file_later(path: str, delay: int = 600):
+async def delete_file_later(path: str, delay: int = 3600):
     await asyncio.sleep(delay)
-    if os.path.exists(path):
-        try:
-            os.remove(path)
-            logger.info(f"🧹 Deleted {path}")
-        except Exception as e:
-            logger.error(f"⚠️ Failed to delete {path}: {e}")
+    try:
+        if os.path.exists(path):
+            size = os.path.getsize(path)
+            if size < 1_000_000:
+                os.remove(path)
+                logger.info(f"🧹 Deleted incomplete (under 1MB) file: {path}")
+            elif time.time() - os.path.getmtime(path) >= 3600:
+                os.remove(path)
+                logger.info(f"🧹 Deleted old file: {path}")
+    except Exception as e:
+        logger.warning(f"⚠️ Failed deleting {path}: {e}")
 
 @app.get("/download/song/{video_id}")
 async def download_song(video_id: str, background_tasks: BackgroundTasks):
     logger.info(f"📥 API Hit: {video_id}")
-
     file = find_file(video_id)
     if file:
-        background_tasks.add_task(delete_file_later, file, 600)
+        background_tasks.add_task(delete_file_later, file)
         return FileResponse(
             path=file,
             media_type="application/octet-stream",
@@ -126,7 +128,7 @@ async def download_song(video_id: str, background_tasks: BackgroundTasks):
     with lock:
         file = find_file(video_id)
         if file:
-            background_tasks.add_task(delete_file_later, file, 600)
+            background_tasks.add_task(delete_file_later, file)
             return FileResponse(
                 path=file,
                 media_type="application/octet-stream",
@@ -142,7 +144,7 @@ async def download_song(video_id: str, background_tasks: BackgroundTasks):
         if not file:
             raise HTTPException(status_code=500, detail="Download failed")
 
-        background_tasks.add_task(delete_file_later, file, 600)
+        background_tasks.add_task(delete_file_later, file)
         return FileResponse(
             path=file,
             media_type="application/octet-stream",

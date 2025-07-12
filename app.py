@@ -19,8 +19,15 @@ COOKIE_FILES = sorted(glob.glob("cookies/*.txt"))
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("ytapi")
 
+# === Lock per video_id ===
+video_locks = {}
+def get_lock(video_id):
+    if video_id not in video_locks:
+        video_locks[video_id] = threading.Lock()
+    return video_locks[video_id]
+
 # === FastAPI App ===
-app = FastAPI(title="Fast VC Downloader API", version="5.0")
+app = FastAPI(title="Fast VC Downloader API", version="5.1")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], allow_credentials=True,
@@ -36,69 +43,61 @@ def find_file(video_id):
     return None
 
 def download_song(video_id):
-    url = f"https://www.youtube.com/watch?v={video_id}"
-    outtmpl = os.path.join(DOWNLOAD_DIR, f"{video_id}.%(ext)s")
+    with get_lock(video_id):
+        url = f"https://www.youtube.com/watch?v={video_id}"
+        outtmpl = os.path.join(DOWNLOAD_DIR, f"{video_id}.%(ext)s")
 
-    for cookie in COOKIE_FILES + [None]:
-        opts = {
-            "format": "bestaudio[ext=m4a]/bestaudio/best",
-            "outtmpl": outtmpl,
-            "quiet": True,
-            "no_warnings": True,
-            "cookiefile": cookie,
-            "retries": 1,
-            "fragment_retries": 1,
-            "file_access_retries": 1,
-            "nopart": True,
-            "noplaylist": True,
-            "prefer_insecure": True,
-            "concurrent_fragment_downloads": 10,
-            "ignoreerrors": True,
-            "no_cache_dir": True,
-            "force_overwrites": True,
-            "addheader": ["User-Agent:Mozilla/5.0"],
-            "postprocessors": [{
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": "128"
-            }]
-        }
-        try:
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                ydl.download([url])
-        except Exception as e:
-            logger.warning(f"❌ Cookie failed ({cookie}): {str(e).splitlines()[0]}")
-            continue
+        for cookie in COOKIE_FILES + [None]:
+            opts = {
+                "format": "bestaudio[ext=m4a]/bestaudio/best",
+                "outtmpl": outtmpl,
+                "quiet": True,
+                "no_warnings": True,
+                "cookiefile": cookie,
+                "retries": 1,
+                "fragment_retries": 1,
+                "file_access_retries": 1,
+                "nopart": True,
+                "noplaylist": True,
+                "prefer_insecure": True,
+                "concurrent_fragment_downloads": 10,
+                "ignoreerrors": True,
+                "no_cache_dir": True,
+                "force_overwrites": True,
+                "addheader": ["User-Agent:Mozilla/5.0"],
+                "postprocessors": [{
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "mp3",
+                    "preferredquality": "128"
+                }]
+            }
+            try:
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    ydl.download([url])
+            except Exception as e:
+                logger.warning(f"❌ Cookie failed ({cookie}): {str(e).splitlines()[0]}")
+                continue
 
-        final = find_file(video_id)
-        if final:
-            return final
+            final = find_file(video_id)
+            if final:
+                return final
 
-    raise Exception("❌ Download failed with all cookies")
+        raise Exception("❌ Download failed with all cookies")
 
-# === Auto-cleaner ===
+# === Auto-cleaner thread: only delete files > 1 hr ===
 def clean_downloads():
     while True:
         now = time.time()
         for file in os.listdir(DOWNLOAD_DIR):
             path = os.path.join(DOWNLOAD_DIR, file)
             try:
-                if not os.path.isfile(path) or file.endswith(".temp.m4a"):
+                if not os.path.isfile(path):
                     continue
 
-                size = os.path.getsize(path)
                 age = now - os.path.getmtime(path)
-
-                # Don't delete fresh files
-                if age < 60:
-                    continue
-
-                if size < 1_000_000 and age > 60:
+                if age > 3600:  # Only delete files older than 1 hour
                     os.remove(path)
-                    logger.info(f"🧹 Deleted incomplete: {path}")
-                elif age > 3600:
-                    os.remove(path)
-                    logger.info(f"🧹 Deleted old: {path}")
+                    logger.info(f"🧹 Deleted: {path}")
             except Exception as e:
                 logger.warning(f"⚠️ Cleanup error: {e}")
         time.sleep(60)
@@ -119,7 +118,7 @@ def trigger_download(video_id: str):
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
 
-    # Verify file exists & big enough
+    # Verify file exists
     if not os.path.exists(file) or os.path.getsize(file) < 500000:
         raise HTTPException(status_code=404, detail="File not ready or too small")
 

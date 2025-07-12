@@ -9,24 +9,25 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 import yt_dlp
 
-# === Setup ===
+# === Config ===
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 COMMON_EXTS = ["mp3", "m4a", "webm", "opus"]
 COOKIE_FILES = sorted(glob.glob("cookies/*.txt"))
 
 # === Logging ===
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("ytapi")
 
-# === FastAPI ===
-app = FastAPI(title="VC Audio API", version="Fast-Final")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+# === FastAPI App ===
+app = FastAPI(title="Fast VC Downloader API", version="5.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], allow_credentials=True,
+    allow_methods=["*"], allow_headers=["*"]
+)
 
-# === Utils ===
+# === Helpers ===
 def find_file(video_id):
     for ext in COMMON_EXTS:
         path = os.path.join(DOWNLOAD_DIR, f"{video_id}.{ext}")
@@ -73,29 +74,31 @@ def download_song(video_id):
         if final:
             return final
 
-    raise Exception("Download failed with all cookies.")
+    raise Exception("❌ Download failed with all cookies")
 
-# === Background Auto Cleaner ===
+# === Auto-cleaner ===
 def clean_downloads():
     while True:
         now = time.time()
         for file in os.listdir(DOWNLOAD_DIR):
             path = os.path.join(DOWNLOAD_DIR, file)
             try:
-                if not os.path.isfile(path):
+                if not os.path.isfile(path) or file.endswith(".temp.m4a"):
                     continue
+
                 size = os.path.getsize(path)
                 age = now - os.path.getmtime(path)
 
+                # Don't delete fresh files
                 if age < 60:
-                    continue  # don't touch new files
+                    continue
 
                 if size < 1_000_000 and age > 60:
                     os.remove(path)
                     logger.info(f"🧹 Deleted incomplete: {path}")
                 elif age > 3600:
                     os.remove(path)
-                    logger.info(f"🧹 Deleted old file: {path}")
+                    logger.info(f"🧹 Deleted old: {path}")
             except Exception as e:
                 logger.warning(f"⚠️ Cleanup error: {e}")
         time.sleep(60)
@@ -105,7 +108,7 @@ threading.Thread(target=clean_downloads, daemon=True).start()
 # === Routes ===
 @app.get("/")
 def root():
-    return {"status": "✅ FastAPI running", "cookies_loaded": len(COOKIE_FILES)}
+    return {"status": "✅ Running", "cookies": COOKIE_FILES}
 
 @app.get("/download/song/{video_id}")
 def trigger_download(video_id: str):
@@ -115,6 +118,10 @@ def trigger_download(video_id: str):
             file = download_song(video_id)
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
+
+    # Verify file exists & big enough
+    if not os.path.exists(file) or os.path.getsize(file) < 500000:
+        raise HTTPException(status_code=404, detail="File not ready or too small")
 
     return FileResponse(
         file,

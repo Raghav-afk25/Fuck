@@ -51,7 +51,7 @@ executor = ThreadPoolExecutor(max_workers=16)
 download_locks = {}
 
 # ========================= 🌐 FastAPI Setup ============================
-app = FastAPI(title="Ultra Optimized API", version="1.1.5")
+app = FastAPI(title="Ultra Optimized API", version="1.1.6")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -80,7 +80,8 @@ def sync_download(video_id):
     url = f"https://www.youtube.com/watch?v={video_id}"
     out = os.path.join(DOWNLOAD_DIR, f"{video_id}.%(ext)s")
 
-    cookie_try_list = COOKIE_FILES + [None]
+    # ✅ Only use existing cookie files
+    cookie_try_list = [f for f in COOKIE_FILES if os.path.exists(f)] + [None]
     random.shuffle(cookie_try_list)
 
     for cookiefile in cookie_try_list:
@@ -184,6 +185,9 @@ async def cookie_health_check():
     sample_url = "https://www.youtube.com/watch?v=2Vv-BfVoq4g"
     results = []
     for cookie in COOKIE_FILES:
+        if not os.path.exists(cookie):
+            continue  # ✅ Skip missing cookies
+
         ydl_opts = {
             "quiet": True,
             "cookiefile": cookie,

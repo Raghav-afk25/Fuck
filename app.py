@@ -4,11 +4,9 @@ import asyncio
 import subprocess
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse, FileResponse
-from dotenv import load_dotenv
 import logging
 import glob
 from datetime import datetime
-load_dotenv()
 app = FastAPI()
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
